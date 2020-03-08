@@ -35,7 +35,12 @@ export function deleteSelectedElements(
   appState: AppState,
 ) {
   return {
-    elements: elements.filter(el => !appState.selectedElementIds[el.id]),
+    elements: elements.map(el => {
+      if (appState.selectedElementIds[el.id]) {
+        return { ...el, version: el.version + 1, deleted: true };
+      }
+      return el;
+    }),
     appState: {
       ...appState,
       selectedElementIds: {},

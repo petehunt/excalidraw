@@ -20,6 +20,7 @@ export class SceneHistory {
       appState: clearAppStatePropertiesForHistory(appState),
       elements: elements.map(element => ({
         ...element,
+        version: element.version + 1,
         points:
           appState.multiElement && appState.multiElement.id === element.id
             ? element.points.slice(0, -1)

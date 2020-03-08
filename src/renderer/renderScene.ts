@@ -18,7 +18,7 @@ import { getSelectedElements } from "../scene/selection";
 import { renderElement, renderElementToSvg } from "./renderElement";
 
 export function renderScene(
-  elements: readonly ExcalidrawElement[],
+  allElements: readonly ExcalidrawElement[],
   appState: AppState,
   selectionElement: ExcalidrawElement | null,
   rc: RoughCanvas,
@@ -41,6 +41,8 @@ export function renderScene(
   if (!canvas) {
     return { atLeastOneVisibleElement: false };
   }
+
+  const elements = allElements.filter(element => !element.deleted);
 
   const context = canvas.getContext("2d")!;
 
@@ -175,6 +177,9 @@ export function renderScene(
   }
 
   // Paint remote pointers
+  context.fillStyle = "rgba(0,0,0,0.1)";
+  context.strokeStyle = "rgba(0,0,0,0.4)";
+
   for (const clientId in sceneState.remotePointerViewportCoords) {
     const { x, y } = sceneState.remotePointerViewportCoords[clientId];
     context.beginPath();

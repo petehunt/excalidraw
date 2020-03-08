@@ -363,6 +363,28 @@ button,
   padding: 10px 20px;
 }
 
+.App-drawing_id {
+  font-size: 0.75rem;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: gray;
+  padding: 10px;
+}
+
+.App-change_drawing_id,
+.App-change_drawing_id:hover {
+  color: gray;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  font-size: 0.75rem;
+  padding: 0;
+  border: 0;
+}
+
 @media (max-width: 600px), (max-height: 500px) and (max-width: 1000px) {
   aside {
     display: none;

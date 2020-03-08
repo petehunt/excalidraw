@@ -85,6 +85,9 @@
   },
   "headings": {
     "canvasActions": "Canvas actions",
+    "drawingId": "Whiteboard ID",
+    "changeDrawingId": "Switch boards",
+    "inputDrawingId": "Enter a whiteboard ID to create or join",
     "selectedShapeActions": "Selected shape actions",
     "shapes": "Shapes"
   },

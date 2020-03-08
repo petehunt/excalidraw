@@ -22,6 +22,17 @@ import { MobileMenu } from "./MobileMenu";
 import { ZoomActions, SelectedShapeActions, ShapesSwitcher } from "./Actions";
 import { Section } from "./Section";
 
+function changeDrawingId(event: React.MouseEvent) {
+  event.preventDefault();
+
+  const newDrawingId = window.prompt(t("headings.inputDrawingId"));
+  if (!newDrawingId) {
+    return;
+  }
+
+  window.location.href = `/${encodeURIComponent(newDrawingId)}`;
+}
+
 interface LayerUIProps {
   actionManager: ActionManager;
   appState: AppState;
@@ -30,6 +41,7 @@ interface LayerUIProps {
   elements: readonly ExcalidrawElement[];
   language: string;
   setElements: (elements: readonly ExcalidrawElement[]) => void;
+  drawingId: string | null;
 }
 
 export const LayerUI = React.memo(
@@ -41,6 +53,7 @@ export const LayerUI = React.memo(
     elements,
     language,
     setElements,
+    drawingId,
   }: LayerUIProps) => {
     const isMobile = useIsMobile();
 
@@ -174,6 +187,19 @@ export const LayerUI = React.memo(
             </Stack.Col>
           </div>
         </FixedSideContainer>
+        <div className="App-drawing_id">
+          {drawingId && (
+            <span>
+              {t("headings.drawingId")} <strong>{drawingId}</strong> &middot;{" "}
+              <button
+                onClick={changeDrawingId}
+                className="App-change_drawing_id"
+              >
+                {t("headings.changeDrawingId")}
+              </button>
+            </span>
+          )}
+        </div>
         <footer role="contentinfo">
           <LanguageList
             onChange={lng => {

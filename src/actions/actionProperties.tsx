@@ -47,6 +47,7 @@ export const actionChangeStrokeColor = register({
     return {
       elements: changeProperty(elements, appState, el => ({
         ...el,
+        version: el.version + 1,
         strokeColor: value,
       })),
       appState: { ...appState, currentItemStrokeColor: value },
@@ -77,6 +78,7 @@ export const actionChangeBackgroundColor = register({
     return {
       elements: changeProperty(elements, appState, el => ({
         ...el,
+        version: el.version + 1,
         backgroundColor: value,
       })),
       appState: { ...appState, currentItemBackgroundColor: value },
@@ -107,6 +109,7 @@ export const actionChangeFillStyle = register({
     return {
       elements: changeProperty(elements, appState, el => ({
         ...el,
+        version: el.version + 1,
         fillStyle: value,
       })),
       appState: { ...appState, currentItemFillStyle: value },
@@ -143,6 +146,7 @@ export const actionChangeStrokeWidth = register({
     return {
       elements: changeProperty(elements, appState, el => ({
         ...el,
+        version: el.version + 1,
         strokeWidth: value,
       })),
       appState: { ...appState, currentItemStrokeWidth: value },
@@ -177,6 +181,7 @@ export const actionChangeSloppiness = register({
     return {
       elements: changeProperty(elements, appState, el => ({
         ...el,
+        version: el.version + 1,
         roughness: value,
       })),
       appState: { ...appState, currentItemRoughness: value },
@@ -211,6 +216,7 @@ export const actionChangeOpacity = register({
     return {
       elements: changeProperty(elements, appState, el => ({
         ...el,
+        version: el.version + 1,
         opacity: value,
       })),
       appState: { ...appState, currentItemOpacity: value },
@@ -261,6 +267,7 @@ export const actionChangeFontSize = register({
         if (isTextElement(el)) {
           const element: ExcalidrawTextElement = {
             ...el,
+            version: el.version + 1,
             font: `${value}px ${el.font.split("px ")[1]}`,
           };
           redrawTextBoundingBox(element);
@@ -309,6 +316,7 @@ export const actionChangeFontFamily = register({
         if (isTextElement(el)) {
           const element: ExcalidrawTextElement = {
             ...el,
+            version: el.version + 1,
             font: `${el.font.split("px ")[0]}px ${value}`,
           };
           redrawTextBoundingBox(element);

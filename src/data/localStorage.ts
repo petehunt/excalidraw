@@ -2,9 +2,21 @@ import { ExcalidrawElement } from "../element/types";
 import { AppState } from "../types";
 import { clearAppStateForLocalStorage } from "../appState";
 import { restore } from "./restore";
+import * as uuid from "uuid";
 
 const LOCAL_STORAGE_KEY = "excalidraw";
 const LOCAL_STORAGE_KEY_STATE = "excalidraw-state";
+const SESSION_STORAGE_KEY_CLIENT_ID = "excalidraw-client_id";
+
+export function getClientId() {
+  const storedClientId = sessionStorage.getItem(SESSION_STORAGE_KEY_CLIENT_ID);
+  if (storedClientId) {
+    return storedClientId;
+  }
+  const newClientId = uuid.v4();
+  sessionStorage.setItem(SESSION_STORAGE_KEY_CLIENT_ID, newClientId);
+  return newClientId;
+}
 
 export function saveToLocalStorage(
   elements: readonly ExcalidrawElement[],

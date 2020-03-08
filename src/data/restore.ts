@@ -48,6 +48,7 @@ export function restore(
 
       return {
         ...element,
+        version: element.version || 0,
         id: element.id || nanoid(),
         fillStyle: element.fillStyle || "hachure",
         strokeWidth: element.strokeWidth || 1,

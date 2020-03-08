@@ -33,6 +33,8 @@ export function newElement(
     opacity,
     seed: randomSeed(),
     points: [] as Point[],
+    deleted: false,
+    version: 1,
   };
   return element;
 }
@@ -45,6 +47,7 @@ export function newTextElement(
   const metrics = measureText(text, font);
   const textElement: ExcalidrawTextElement = {
     ...element,
+    version: element.version + 1,
     type: "text",
     text: text,
     font: font,

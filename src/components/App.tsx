@@ -29,6 +29,7 @@ import {
   getNormalizedZoom,
   getSelectedElements,
   isSomeElementSelected,
+  calculateScrollCenter,
 } from "../scene";
 import {
   decryptAESGEM,
@@ -46,10 +47,10 @@ import { AppState, GestureEvent, Gesture } from "../types";
 import { ExcalidrawElement } from "../element/types";
 
 import {
+  debounce,
   isWritableElement,
   isInputLike,
   isToolIcon,
-  debounce,
   distance,
   distance2d,
   resetCursor,
@@ -88,6 +89,12 @@ import { LayerUI } from "./LayerUI";
 import { ScrollBars } from "../scene/types";
 import { invalidateShapeForElement } from "../renderer/renderElement";
 import { generateCollaborationLink, getCollaborationLinkData } from "../data";
+import { database, ServerValue } from "../firebase";
+import { hri } from "human-readable-ids";
+import throttle from "lodash.throttle";
+import stringify from "fast-json-stable-stringify";
+import { getClientId } from "../data/localStorage";
+import { mutateElement } from "../element/mutateElement";
 
 // -----------------------------------------------------------------------------
 // TEST HOOKS
@@ -155,10 +162,17 @@ export class App extends React.Component<any, AppState> {
   roomID: string | null = null;
   roomKey: string | null = null;
 
+  firebaseRef: firebase.database.Reference | null = null;
+
   actionManager: ActionManager;
   canvasOnlyActions = ["selectAll"];
+  clientId: string;
+  lastElementsJsonInFirebase: string = "";
+
   constructor(props: any) {
     super(props);
+    this.clientId = getClientId();
+
     this.actionManager = new ActionManager(
       this.syncActionResult,
       () => this.state,
@@ -217,8 +231,8 @@ export class App extends React.Component<any, AppState> {
 
   private onUnload = () => {
     isHoldingSpace = false;
-    this.saveDebounced();
-    this.saveDebounced.flush();
+    this.saveElementsThrottled();
+    this.saveElementsThrottled.flush();
   };
 
   private disableEvent: EventHandlerNonNull = event => {
@@ -316,6 +330,11 @@ export class App extends React.Component<any, AppState> {
   };
 
   private unmounted = false;
+
+  getDrawingId() {
+    return window.location.pathname.replace(/\//g, "");
+  }
+
   public async componentDidMount() {
     if (process.env.NODE_ENV === "test") {
       Object.defineProperty(window.__TEST__, "appState", {
@@ -352,13 +371,101 @@ export class App extends React.Component<any, AppState> {
     );
     document.addEventListener("gestureend", this.onGestureEnd as any, false);
 
-    const searchParams = new URLSearchParams(window.location.search);
-    const id = searchParams.get("id");
+    const id = this.getDrawingId();
 
     if (id) {
       // Backwards compatibility with legacy url format
-      const scene = await loadScene(id);
-      this.syncActionResult(scene);
+      //const scene = await loadScene(id);
+      //this.syncActionResult(scene);
+
+      // @@@ TODO: backport into loadScene
+      this.firebaseRef = database.ref("drawings").child(
+        id
+          .split("-")
+          .join("")
+          .split(" ")
+          .join("")
+          .toLowerCase(),
+      );
+      let fetchedInitialBoard = false;
+      this.firebaseRef.child("elements").on("value", snapshot => {
+        const newElements = (snapshot.val() || []) as ExcalidrawElement[];
+        const json = stringify(newElements);
+        if (this.lastElementsJsonInFirebase !== json) {
+          this.lastElementsJsonInFirebase = json;
+
+          // the appState may hold references to and mutate ExcalidrawElement instances so
+          // we do a copy instead.
+          const idToLocalElement = new Map(
+            elements.map(element => [element.id, element]),
+          );
+          const newElementIds = new Set();
+          const nextElements = newElements
+            .map(newElement => {
+              newElementIds.add(newElement.id);
+              const localElement = idToLocalElement.get(newElement.id);
+              if (!localElement) {
+                // Hack: firebase doesn't store empty arrays.
+                (newElement as any).points = newElement.points || [];
+                return newElement;
+              }
+              if (localElement.version < newElement.version) {
+                Object.assign(localElement, newElement);
+                invalidateShapeForElement(localElement);
+              }
+              return localElement;
+            })
+            .concat(elements.filter(element => !newElementIds.has(element.id)));
+
+          this.syncActionResult({
+            elements: nextElements,
+            appState:
+              !fetchedInitialBoard && nextElements.length > 0
+                ? {
+                    ...this.state,
+                    ...calculateScrollCenter(nextElements),
+                  }
+                : undefined,
+          });
+
+          fetchedInitialBoard = true;
+        }
+      });
+      this.firebaseRef.child("pointers").on("value", snapshot => {
+        // Drop pointers that haven't moved in 10 seconds since we last moved our pointer locally.
+        // We do it in this way since we don't want to depend on synchronized clocks.
+        const remotePointersWithTimestamp = snapshot.val() as {
+          [id: string]: {
+            pointerCoords: { x: number; y: number };
+            lastUpdated: number;
+          };
+        } | null;
+
+        if (!remotePointersWithTimestamp) {
+          return;
+        }
+
+        const mostRecentUpdated = Math.max(
+          ...Object.values(remotePointersWithTimestamp).map(
+            item => item.lastUpdated,
+          ),
+        );
+        const remotePointers: { [id: string]: { x: number; y: number } } = {};
+
+        for (const clientId in remotePointersWithTimestamp) {
+          if (
+            clientId !== this.clientId &&
+            remotePointersWithTimestamp[clientId].lastUpdated >=
+              mostRecentUpdated - 10000
+          ) {
+            remotePointers[clientId] =
+              remotePointersWithTimestamp[clientId].pointerCoords;
+          }
+        }
+        this.setState({ remotePointers });
+      });
+    } else {
+      window.location.replace(`/${encodeURIComponent(hri.random())}`);
     }
 
     const jsonMatch = window.location.hash.match(
@@ -375,8 +482,10 @@ export class App extends React.Component<any, AppState> {
       this.initializeSocketClient();
       return;
     }
-    const scene = await loadScene(null);
-    this.syncActionResult(scene);
+
+    // @@@ todo: restore
+    //const scene = await loadScene(null);
+    //this.syncActionResult(scene);
   }
 
   public componentWillUnmount() {
@@ -444,7 +553,7 @@ export class App extends React.Component<any, AppState> {
         : ELEMENT_TRANSLATE_AMOUNT;
       elements = elements.map(el => {
         if (this.state.selectedElementIds[el.id]) {
-          const element = { ...el };
+          const element = { ...el, version: el.version + 1 };
           if (event.key === KEYS.ARROW_LEFT) {
             element.x -= step;
           } else if (event.key === KEYS.ARROW_RIGHT) {
@@ -601,6 +710,7 @@ export class App extends React.Component<any, AppState> {
           elements={elements}
           setElements={this.setElements}
           language={getLanguage()}
+          drawingId={this.getDrawingId()}
         />
         <main>
           <canvas
@@ -774,8 +884,10 @@ export class App extends React.Component<any, AppState> {
       textY = centerElementYInViewport;
 
       // x and y will change after calling newTextElement function
-      element.x = centerElementX;
-      element.y = centerElementY;
+      mutateElement(element, element => {
+        element.x = centerElementX;
+        element.y = centerElementY;
+      });
     } else if (!event.altKey) {
       const snappedToCenterPosition = this.getTextWysiwygSnappedToCenterPosition(
         x,
@@ -783,8 +895,10 @@ export class App extends React.Component<any, AppState> {
       );
 
       if (snappedToCenterPosition) {
-        element.x = snappedToCenterPosition.elementCenterX;
-        element.y = snappedToCenterPosition.elementCenterY;
+        mutateElement(element, element => {
+          element.x = snappedToCenterPosition.elementCenterX;
+          element.y = snappedToCenterPosition.elementCenterY;
+        });
         textX = snappedToCenterPosition.wysiwygX;
         textY = snappedToCenterPosition.wysiwygY;
       }
@@ -839,7 +953,8 @@ export class App extends React.Component<any, AppState> {
       this.state,
       this.canvas,
     );
-    this.savePointer(pointerCoords);
+    this.savePointerThrottled(pointerCoords);
+
     if (gesture.pointers.has(event.pointerId)) {
       gesture.pointers.set(event.pointerId, {
         x: event.clientX,
@@ -1336,13 +1451,17 @@ export class App extends React.Component<any, AppState> {
 
         const dx = element.x + width + p1[0];
         const dy = element.y + height + p1[1];
-        element.x = dx;
-        element.y = dy;
+        mutateElement(element, element => {
+          element.x = dx;
+          element.y = dy;
+        });
         p1[0] = absPx - element.x;
         p1[1] = absPy - element.y;
       } else {
-        element.x += deltaX;
-        element.y += deltaY;
+        mutateElement(element, element => {
+          element.x += deltaX;
+          element.y += deltaY;
+        });
         p1[0] -= deltaX;
         p1[1] -= deltaY;
       }
@@ -1452,16 +1571,18 @@ export class App extends React.Component<any, AppState> {
                   event.shiftKey,
                 );
               } else {
-                element.width -= deltaX;
-                element.x += deltaX;
+                mutateElement(element, element => {
+                  element.width -= deltaX;
+                  element.x += deltaX;
 
-                if (event.shiftKey) {
-                  element.y += element.height - element.width;
-                  element.height = element.width;
-                } else {
-                  element.height -= deltaY;
-                  element.y += deltaY;
-                }
+                  if (event.shiftKey) {
+                    element.y += element.height - element.width;
+                    element.height = element.width;
+                  } else {
+                    element.height -= deltaY;
+                    element.y += deltaY;
+                  }
+                });
               }
               break;
             case "ne":
@@ -1484,14 +1605,16 @@ export class App extends React.Component<any, AppState> {
                   event.shiftKey,
                 );
               } else {
-                element.width += deltaX;
-                if (event.shiftKey) {
-                  element.y += element.height - element.width;
-                  element.height = element.width;
-                } else {
-                  element.height -= deltaY;
-                  element.y += deltaY;
-                }
+                mutateElement(element, element => {
+                  element.width += deltaX;
+                  if (event.shiftKey) {
+                    element.y += element.height - element.width;
+                    element.height = element.width;
+                  } else {
+                    element.height -= deltaY;
+                    element.y += deltaY;
+                  }
+                });
               }
               break;
             case "sw":
@@ -1514,13 +1637,15 @@ export class App extends React.Component<any, AppState> {
                   event.shiftKey,
                 );
               } else {
-                element.width -= deltaX;
-                element.x += deltaX;
-                if (event.shiftKey) {
-                  element.height = element.width;
-                } else {
-                  element.height += deltaY;
-                }
+                mutateElement(element, element => {
+                  element.width -= deltaX;
+                  element.x += deltaX;
+                  if (event.shiftKey) {
+                    element.height = element.width;
+                  } else {
+                    element.height += deltaY;
+                  }
+                });
               }
               break;
             case "se":
@@ -1543,18 +1668,22 @@ export class App extends React.Component<any, AppState> {
                   event.shiftKey,
                 );
               } else {
-                if (event.shiftKey) {
-                  element.width += deltaX;
-                  element.height = element.width;
-                } else {
-                  element.width += deltaX;
-                  element.height += deltaY;
-                }
+                mutateElement(element, element => {
+                  if (event.shiftKey) {
+                    element.width += deltaX;
+                    element.height = element.width;
+                  } else {
+                    element.width += deltaX;
+                    element.height += deltaY;
+                  }
+                });
               }
               break;
             case "n": {
-              element.height -= deltaY;
-              element.y += deltaY;
+              mutateElement(element, element => {
+                element.height -= deltaY;
+                element.y += deltaY;
+              });
 
               if (element.points.length > 0) {
                 const len = element.points.length;
@@ -1569,8 +1698,10 @@ export class App extends React.Component<any, AppState> {
               break;
             }
             case "w": {
-              element.width -= deltaX;
-              element.x += deltaX;
+              mutateElement(element, element => {
+                element.width -= deltaX;
+                element.x += deltaX;
+              });
 
               if (element.points.length > 0) {
                 const len = element.points.length;
@@ -1584,29 +1715,38 @@ export class App extends React.Component<any, AppState> {
               break;
             }
             case "s": {
-              element.height += deltaY;
-              if (element.points.length > 0) {
-                const len = element.points.length;
-                const points = [...element.points].sort((a, b) => a[1] - b[1]);
+              mutateElement(element, element => {
+                element.height += deltaY;
+                if (element.points.length > 0) {
+                  const len = element.points.length;
+                  const points = [...element.points].sort(
+                    (a, b) => a[1] - b[1],
+                  );
 
-                for (let i = 1; i < points.length; ++i) {
-                  const pnt = points[i];
-                  pnt[1] += deltaY / (len - i);
+                  for (let i = 1; i < points.length; ++i) {
+                    const pnt = points[i];
+                    pnt[1] += deltaY / (len - i);
+                  }
                 }
-              }
+              });
+
               break;
             }
             case "e": {
-              element.width += deltaX;
-              if (element.points.length > 0) {
-                const len = element.points.length;
-                const points = [...element.points].sort((a, b) => a[0] - b[0]);
+              mutateElement(element, element => {
+                element.width += deltaX;
+                if (element.points.length > 0) {
+                  const len = element.points.length;
+                  const points = [...element.points].sort(
+                    (a, b) => a[0] - b[0],
+                  );
 
-                for (let i = 1; i < points.length; ++i) {
-                  const pnt = points[i];
-                  pnt[0] += deltaX / (len - i);
+                  for (let i = 1; i < points.length; ++i) {
+                    const pnt = points[i];
+                    pnt[0] += deltaX / (len - i);
+                  }
                 }
-              }
+              });
               break;
             }
           }
@@ -1620,8 +1760,10 @@ export class App extends React.Component<any, AppState> {
             element,
             resizeHandle,
           });
-          el.x = element.x;
-          el.y = element.y;
+          mutateElement(el, el => {
+            el.x = element.x;
+            el.y = element.y;
+          });
           invalidateShapeForElement(el);
 
           lastX = x;
@@ -1644,8 +1786,10 @@ export class App extends React.Component<any, AppState> {
           );
 
           selectedElements.forEach(element => {
-            element.x += x - lastX;
-            element.y += y - lastY;
+            mutateElement(element, element => {
+              element.x += x - lastX;
+              element.y += y - lastY;
+            });
           });
           lastX = x;
           lastY = y;
@@ -1707,11 +1851,13 @@ export class App extends React.Component<any, AppState> {
           }
         }
 
-        draggingElement.x = x < originX ? originX - width : originX;
-        draggingElement.y = y < originY ? originY - height : originY;
+        mutateElement(draggingElement, draggingElement => {
+          draggingElement.x = x < originX ? originX - width : originX;
+          draggingElement.y = y < originY ? originY - height : originY;
 
-        draggingElement.width = width;
-        draggingElement.height = height;
+          draggingElement.width = width;
+          draggingElement.height = height;
+        });
       }
 
       invalidateShapeForElement(draggingElement);
@@ -1972,29 +2118,60 @@ export class App extends React.Component<any, AppState> {
     }
   }
 
-  private savePointer = (pointerCoords: { x: number; y: number }) => {
-    if (isNaN(pointerCoords.x) || isNaN(pointerCoords.y)) {
-      // sometimes the pointer goes off screen
-      return;
+  private savePointerThrottled = throttle(
+    (pointerCoords: { x: number; y: number }) => {
+      if (isNaN(pointerCoords.x) || isNaN(pointerCoords.y)) {
+        // sometimes the pointer goes off screen
+        return;
+      }
+      if (this.firebaseRef) {
+        this.firebaseRef
+          .child("pointers")
+          .child(this.clientId)
+          .set({
+            pointerCoords,
+            lastUpdated: ServerValue.TIMESTAMP,
+          });
+      }
+
+      this.socket &&
+        this.broadcastSocketData({
+          type: "MOUSE_LOCATION",
+          payload: {
+            socketID: this.socket.id,
+            pointerCoords,
+          },
+        });
+    },
+    50,
+  );
+
+  private saveElementsThrottled = throttle(() => {
+    if (this.firebaseRef) {
+      //// sometimes elements get NaN for their pointer position. skip over those for now.
+      //const elementsToSave = elements.filter(
+      //  element => !(isNaN(element.x) || isNaN(element.width)),
+      //);
+      const elementsToSave = elements;
+      const serialized = stringify(elementsToSave);
+      if (this.lastElementsJsonInFirebase === serialized) {
+        return;
+      }
+      this.lastElementsJsonInFirebase = serialized;
+      this.firebaseRef.child("elements").set(elementsToSave);
     }
-    this.socket &&
-      this.broadcastSocketData({
-        type: "MOUSE_LOCATION",
-        payload: {
-          socketID: this.socket.id,
-          pointerCoords,
-        },
-      });
-  };
+  }, 200);
 
   private saveDebounced = debounce(() => {
-    saveToLocalStorage(elements, this.state);
+    // @@@ todo: restore
+    //saveToLocalStorage(elements, this.state);
   }, 300);
 
   componentDidUpdate() {
     if (this.state.isCollaborating && !this.socket) {
       this.initializeSocketClient();
     }
+
     const pointerViewportCoords: {
       [id: string]: { x: number; y: number };
     } = {};
@@ -2009,6 +2186,7 @@ export class App extends React.Component<any, AppState> {
         this.canvas,
       );
     }
+
     const { atLeastOneVisibleElement, scrollBars } = renderScene(
       elements,
       this.state,
@@ -2033,6 +2211,7 @@ export class App extends React.Component<any, AppState> {
     if (this.state.scrolledOutside !== scrolledOutside) {
       this.setState({ scrolledOutside: scrolledOutside });
     }
+    this.saveElementsThrottled();
     this.saveDebounced();
     if (history.isRecording()) {
       this.broadcastSocketData({
