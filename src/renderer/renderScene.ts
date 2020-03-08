@@ -18,7 +18,7 @@ import { getSelectedElements } from "../scene/selection";
 import { renderElement, renderElementToSvg } from "./renderElement";
 
 export function renderScene(
-  elements: readonly ExcalidrawElement[],
+  allElements: readonly ExcalidrawElement[],
   appState: AppState,
   selectionElement: ExcalidrawElement | null,
   rc: RoughCanvas,
@@ -41,6 +41,8 @@ export function renderScene(
   if (!canvas) {
     return { atLeastOneVisibleElement: false };
   }
+
+  const elements = allElements.filter(element => !element.deleted);
 
   const context = canvas.getContext("2d")!;
 
