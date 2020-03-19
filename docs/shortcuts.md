@@ -43,3 +43,5 @@
 | Zoom in    | ⌘+  | `Ctrl + +` |
 | Zoom out   | ⌘-  | `Ctrl + -` |
 | Zoom reset | ⌘0  | `Ctrl + 0` |
+
+test
