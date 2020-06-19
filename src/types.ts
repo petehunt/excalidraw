@@ -79,6 +79,9 @@ export type AppState = {
   /** group being edited when you drill down to its constituent element
     (e.g. when you double-click on a group's element) */
   editingGroupId: GroupId | null;
+
+  isLibraryOpen: boolean;
+  library: NonDeleted<ExcalidrawElement>[][];
 };
 
 export type PointerCoords = Readonly<{

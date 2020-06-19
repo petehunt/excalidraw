@@ -1,10 +1,14 @@
-import React from "react";
+import React, { useRef, RefObject, useEffect, useCallback } from "react";
 import { showSelectedShapeActions } from "../element";
 import { calculateScrollCenter } from "../scene";
 import { exportCanvas } from "../data";
 
 import { AppState } from "../types";
-import { NonDeletedExcalidrawElement } from "../element/types";
+import {
+  NonDeletedExcalidrawElement,
+  ExcalidrawElement,
+  NonDeleted,
+} from "../element/types";
 
 import { ActionManager } from "../actions/manager";
 import { Island } from "./Island";
@@ -32,6 +36,7 @@ import { GitHubCorner } from "./GitHubCorner";
 import { Tooltip } from "./Tooltip";
 
 import "./LayerUI.scss";
+import { LibraryUnit } from "./LibraryUnit";
 
 interface LayerUIProps {
   actionManager: ActionManager;
@@ -47,6 +52,84 @@ interface LayerUIProps {
   toggleZenMode: () => void;
   lng: string;
 }
+
+function useOnClickOutside(
+  ref: RefObject<HTMLElement>,
+  cb: (event: MouseEvent) => void,
+) {
+  useEffect(() => {
+    const listener = (event: MouseEvent) => {
+      if (!ref.current) {
+        return;
+      }
+
+      if (
+        event.target instanceof Element &&
+        (ref.current.contains(event.target) ||
+          !document.body.contains(event.target))
+      ) {
+        return;
+      }
+
+      cb(event);
+    };
+    document.addEventListener("click", listener, false);
+
+    return () => {
+      document.removeEventListener("click", listener);
+    };
+  }, [ref, cb]);
+}
+
+const LibraryMenu = ({
+  library,
+  onClickOutside,
+  onRemoveFromLibrary,
+}: {
+  library: readonly NonDeleted<ExcalidrawElement>[][];
+  onClickOutside: (event: MouseEvent) => void;
+  onRemoveFromLibrary: (index: number) => void;
+}) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useOnClickOutside(ref, onClickOutside);
+
+  const CELLS_PER_ROW = 3;
+  const numRows = Math.ceil(library.length / CELLS_PER_ROW);
+  const rows = [];
+  for (let row = 0; row < numRows; row++) {
+    const i = CELLS_PER_ROW * row;
+    rows.push(
+      <Stack.Row align="center" gap={1} key={row}>
+        <Stack.Col>
+          <LibraryUnit
+            elements={library[i]}
+            onRemoveFromLibrary={onRemoveFromLibrary.bind(null, i)}
+          />
+        </Stack.Col>
+        <Stack.Col>
+          <LibraryUnit
+            elements={library[i + 1]}
+            onRemoveFromLibrary={onRemoveFromLibrary.bind(null, i + 1)}
+          />
+        </Stack.Col>
+        <Stack.Col>
+          <LibraryUnit
+            elements={library[i + 2]}
+            onRemoveFromLibrary={onRemoveFromLibrary.bind(null, i + 2)}
+          />
+        </Stack.Col>
+      </Stack.Row>,
+    );
+  }
+
+  return (
+    <Island padding={1} ref={ref}>
+      <Stack.Col align="center" gap={1}>
+        {rows}
+      </Stack.Col>
+    </Island>
+  );
+};
 
 const LayerUI = ({
   actionManager,
@@ -167,11 +250,34 @@ const LayerUI = ({
     </Section>
   );
 
+  const closeLibrary = useCallback(
+    (event) => {
+      setAppState({ isLibraryOpen: false });
+    },
+    [setAppState],
+  );
+
+  const removeFromLibrary = useCallback(
+    (indexToRemove) => {
+      setAppState({
+        library: appState.library.filter((_, index) => index !== indexToRemove),
+      });
+    },
+    [appState, setAppState],
+  );
+
   const renderFixedSideContainer = () => {
     const shouldRenderSelectedShapeActions = showSelectedShapeActions(
       appState,
       elements,
     );
+    const libraryMenu = appState.isLibraryOpen ? (
+      <LibraryMenu
+        library={appState.library}
+        onClickOutside={closeLibrary}
+        onRemoveFromLibrary={removeFromLibrary}
+      />
+    ) : null;
     return (
       <FixedSideContainer side="top">
         <HintViewer appState={appState} elements={elements} />
@@ -193,6 +299,8 @@ const LayerUI = ({
                       <ShapesSwitcher
                         elementType={appState.elementType}
                         setAppState={setAppState}
+                        isLibraryOpen={appState.isLibraryOpen}
+                        hasLibrary={appState.library.length > 0}
                       />
                     </Stack.Row>
                   </Island>
@@ -203,6 +311,7 @@ const LayerUI = ({
                     title={t("toolBar.lock")}
                   />
                 </Stack.Row>
+                {libraryMenu}
               </Stack.Col>
             )}
           </Section>

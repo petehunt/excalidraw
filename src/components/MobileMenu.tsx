@@ -56,6 +56,8 @@ export const MobileMenu = ({
                   <ShapesSwitcher
                     elementType={appState.elementType}
                     setAppState={setAppState}
+                    isLibraryOpen={false}
+                    hasLibrary={false}
                   />
                 </Stack.Row>
               </Island>
