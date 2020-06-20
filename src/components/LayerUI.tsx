@@ -48,6 +48,7 @@ interface LayerUIProps {
   onUsernameChange: (username: string) => void;
   onRoomDestroy: () => void;
   onLockToggle: () => void;
+  onInsertShape: (elements: readonly NonDeleted<ExcalidrawElement>[]) => void;
   zenModeEnabled: boolean;
   toggleZenMode: () => void;
   lng: string;
@@ -85,10 +86,12 @@ const LibraryMenu = ({
   library,
   onClickOutside,
   onRemoveFromLibrary,
+  onInsertShape,
 }: {
   library: readonly NonDeleted<ExcalidrawElement>[][];
   onClickOutside: (event: MouseEvent) => void;
   onRemoveFromLibrary: (index: number) => void;
+  onInsertShape: (elements: readonly NonDeleted<ExcalidrawElement>[]) => void;
 }) => {
   const ref = useRef<HTMLDivElement | null>(null);
   useOnClickOutside(ref, onClickOutside);
@@ -104,18 +107,21 @@ const LibraryMenu = ({
           <LibraryUnit
             elements={library[i]}
             onRemoveFromLibrary={onRemoveFromLibrary.bind(null, i)}
+            onClick={onInsertShape.bind(null, library[i])}
           />
         </Stack.Col>
         <Stack.Col>
           <LibraryUnit
             elements={library[i + 1]}
             onRemoveFromLibrary={onRemoveFromLibrary.bind(null, i + 1)}
+            onClick={onInsertShape.bind(null, library[i + 1])}
           />
         </Stack.Col>
         <Stack.Col>
           <LibraryUnit
             elements={library[i + 2]}
             onRemoveFromLibrary={onRemoveFromLibrary.bind(null, i + 2)}
+            onClick={onInsertShape.bind(null, library[i + 2])}
           />
         </Stack.Col>
       </Stack.Row>,
@@ -141,6 +147,7 @@ const LayerUI = ({
   onUsernameChange,
   onRoomDestroy,
   onLockToggle,
+  onInsertShape,
   zenModeEnabled,
   toggleZenMode,
 }: LayerUIProps) => {
@@ -276,6 +283,7 @@ const LayerUI = ({
         library={appState.library}
         onClickOutside={closeLibrary}
         onRemoveFromLibrary={removeFromLibrary}
+        onInsertShape={onInsertShape}
       />
     ) : null;
     return (

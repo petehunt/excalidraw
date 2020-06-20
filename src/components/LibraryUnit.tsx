@@ -9,9 +9,11 @@ import { t } from "../i18n";
 export const LibraryUnit = ({
   elements,
   onRemoveFromLibrary,
+  onClick,
 }: {
   elements?: NonDeleted<ExcalidrawElement>[];
   onRemoveFromLibrary: () => void;
+  onClick: () => void;
 }) => {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -49,6 +51,7 @@ export const LibraryUnit = ({
         className="library-unit__dragger"
         ref={ref}
         draggable={true}
+        onClick={onClick}
         onDragStart={(event) => {
           setIsHovered(false);
           event.dataTransfer.setData(

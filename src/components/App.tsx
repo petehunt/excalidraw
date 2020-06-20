@@ -239,6 +239,9 @@ class App extends React.Component<any, AppState> {
             });
           }}
           onLockToggle={this.toggleLock}
+          onInsertShape={(elements) =>
+            this.addElementsFromPasteOrLibrary(elements)
+          }
           zenModeEnabled={zenModeEnabled}
           toggleZenMode={this.toggleZenMode}
           lng={getLanguage().lng}
