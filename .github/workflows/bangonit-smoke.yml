@@ -51,18 +51,18 @@ jobs:
           sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
 
       - name: Setup project
-        run: npm install
+        run: yarn
 
       - name: Start server
-        run: npm start &
+        run: yarn start &
         env:
           BROWSER: none
 
       - name: Wait for server
-        run: npx wait-on http://localhost:3000 --timeout 30000
+        run: npx wait-on http://localhost:3000 --timeout 60000
 
       - name: Install bangonit
-        run: npm install -g bangonit
+        run: yarn global add bangonit
 
       - name: Comment test starting
         id: start-comment
