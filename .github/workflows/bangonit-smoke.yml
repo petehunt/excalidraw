@@ -1,0 +1,166 @@
+# Bang On It! — Smoke Tests
+# Runs on every push to main/master and on pull requests.
+#
+# EDIT: Review the steps below and adjust for your project:
+#   - node-version: set to your project's Node.js version
+#   - "Setup project": your install/build commands
+#   - "Start server": command to start your app in the background
+#   - "Wait for server": URL your app serves on
+#   - "Run smoke tests": timeout and test plan path
+#
+# REQUIRED SECRET:
+#   ANTHROPIC_API_KEY — your Anthropic API key
+#     Set at: https://github.com/<owner>/<repo>/settings/secrets/actions
+#
+# OPTIONAL — to upload recordings to S3 and link them in PR comments:
+#   1. Add secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+#   2. Uncomment the "Upload recordings to S3" step below
+#   3. Set BANGONIT_S3_BASE_URL in the env section
+
+name: "Bang On It! Smoke Tests"
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      BANGONIT_S3_BASE_URL: "https://domyjob.sfo3.digitaloceanspaces.com/bangonit"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'  # EDIT: your Node.js version
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
+
+      - name: Setup project
+        run: npm install
+
+      - name: Start server
+        run: npm start &
+        env:
+          BROWSER: none
+
+      - name: Wait for server
+        run: npx wait-on http://localhost:3000 --timeout 30000
+
+      - name: Install bangonit
+        run: npm install -g bangonit
+
+      - name: Comment test starting
+        id: start-comment
+        if: github.event_name == 'pull_request'
+        run: |
+          COMMENT_ID=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+            --method POST --field "body=🧪 **Bang On It!** smoke tests starting..." --jq '.id')
+          echo "comment_id=$COMMENT_ID" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Run smoke tests
+        run: |
+          xvfb-run --auto-servernum boi run testplans/smoke/*.md \
+            --timeout 300 \
+            --output ${{ github.workspace }}/bangonit-output.json --record
+
+      - name: Upload recordings to S3
+        if: always()
+        run: |
+          if [ -d recordings ]; then
+            for dir in recordings/*/; do
+              if [ -d "$dir" ]; then
+                DIRNAME=$(basename "$dir")
+                aws s3 sync "$dir" "s3://domyjob/bangonit/$DIRNAME/" \
+                  --endpoint-url https://sfo3.digitaloceanspaces.com --no-progress
+                aws s3api list-objects-v2 --bucket domyjob --prefix "bangonit/$DIRNAME/" \
+                  --endpoint-url https://sfo3.digitaloceanspaces.com --query 'Contents[].Key' --output text | tr '\t' '\n' | while read -r key; do
+                  aws s3api put-object-acl --bucket domyjob --key "$key" --acl public-read \
+                    --endpoint-url https://sfo3.digitaloceanspaces.com
+                done
+              fi
+            done
+          fi
+
+      - name: Comment test results
+        if: always()
+        run: |
+          OUTPUT="${{ github.workspace }}/bangonit-output.json"
+          if [ ! -f "$OUTPUT" ]; then
+            BODY="## ${{ github.workflow }} — ❌ Failed\n\nNo test output was produced. Check the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          else
+            STATUS=$(jq -r '.status' "$OUTPUT")
+            if [ "$STATUS" = "pass" ]; then
+              HEADER="## ${{ github.workflow }} — ✅ Passed"
+            else
+              HEADER="## ${{ github.workflow }} — ❌ Failed"
+            fi
+
+            TABLE="| Test | Status | Duration | Recording |\n|------|--------|----------|-----------|"
+            for row in $(jq -r '.tests[] | @base64' "$OUTPUT"); do
+              NAME=$(echo "$row" | base64 -d | jq -r '.name')
+              TEST_STATUS=$(echo "$row" | base64 -d | jq -r '.status')
+              DURATION=$(echo "$row" | base64 -d | jq -r '(.duration / 1000 * 10 | round / 10)')
+              if [ "$TEST_STATUS" = "pass" ]; then
+                EMOJI="✅"
+              else
+                EMOJI="❌"
+              fi
+              RECORDING=""
+              RECORDING_URL=$(jq -r --arg name "$NAME" '.recordings[]? | select(.name | contains($name)) | .url // empty' "$OUTPUT" 2>/dev/null || true)
+              if [ -z "$RECORDING_URL" ] && [ -n "$BANGONIT_S3_BASE_URL" ] && [ -d "recordings" ]; then
+                for rdir in recordings/*/index.html; do
+                  if [ -f "$rdir" ]; then
+                    RNAME=$(basename "$(dirname "$rdir")")
+                    RECORDING_URL="$BANGONIT_S3_BASE_URL/$RNAME/index.html"
+                    break
+                  fi
+                done
+              fi
+              if [ -n "$RECORDING_URL" ]; then
+                RECORDING="[View recording]($RECORDING_URL)"
+              fi
+              TABLE="$TABLE\n| $NAME | $EMOJI $TEST_STATUS | ${DURATION}s | $RECORDING |"
+            done
+
+            BODY="$HEADER\n\n$TABLE"
+          fi
+
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ -n "${{ steps.start-comment.outputs.comment_id }}" ]; then
+            printf "%b" "$BODY" | gh api repos/${{ github.repository }}/issues/comments/${{ steps.start-comment.outputs.comment_id }} \
+              --method PATCH --field "body=@-"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            printf "%b" "$BODY" | gh pr comment ${{ github.event.pull_request.number }} \
+              --repo ${{ github.repository }} --body-file -
+          else
+            printf "%b" "$BODY" | gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments \
+              --method POST --field "body=@-"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bangonit-smoke-results
+          path: |
+            ${{ github.workspace }}/bangonit-output.json
+            recordings/
+          if-no-files-found: ignore

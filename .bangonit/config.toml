@@ -1,0 +1,8 @@
+# Bang On It! configuration
+# Docs: https://bangonit.dev/docs/config
+
+testplans = "testplans"
+recordings_dir = "recordings"
+
+# EDIT: Uncomment and set your Anthropic API key, or set ANTHROPIC_API_KEY env var
+# anthropic_api_key = "sk-ant-..."
